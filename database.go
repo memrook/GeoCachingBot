@@ -22,13 +22,14 @@ type Cache struct {
 }
 
 type UserSession struct {
-	UserID        int64     `json:"user_id"`
-	CacheID       int64     `json:"cache_id"`
-	LastLatitude  float64   `json:"last_latitude"`
-	LastLongitude float64   `json:"last_longitude"`
-	LastMessageID int       `json:"last_message_id"`
-	IsActive      bool      `json:"is_active"`
-	LastUpdate    time.Time `json:"last_update"`
+	UserID          int64     `json:"user_id"`
+	CacheID         int64     `json:"cache_id"`
+	LastLatitude    float64   `json:"last_latitude"`
+	LastLongitude   float64   `json:"last_longitude"`
+	LastMessageID   int       `json:"last_message_id"`
+	LastMessageText string    `json:"last_message_text"`
+	IsActive        bool      `json:"is_active"`
+	LastUpdate      time.Time `json:"last_update"`
 }
 
 type AdminSession struct {
@@ -55,7 +56,7 @@ func NewDatabase(dataSourceName string) (*Database, error) {
 }
 
 func (d *Database) createTables() error {
-	// Таблица кэшей
+	// Таблица тайников
 	cacheTable := `
 	CREATE TABLE IF NOT EXISTS caches (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,6 +76,7 @@ func (d *Database) createTables() error {
 		last_latitude REAL,
 		last_longitude REAL,
 		last_message_id INTEGER,
+		last_message_text TEXT,
 		is_active BOOLEAN DEFAULT TRUE,
 		last_update DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (cache_id) REFERENCES caches (id)
@@ -105,7 +107,7 @@ func (d *Database) Close() error {
 	return d.db.Close()
 }
 
-// Методы для работы с кэшами
+// Методы для работы с тайниками
 func (d *Database) CreateCache(cache *Cache) error {
 	query := `INSERT INTO caches (code_word, latitude, longitude, photo_path, created_by) 
 			  VALUES (?, ?, ?, ?, ?)`
@@ -144,22 +146,22 @@ func (d *Database) GetCacheByCodeWord(codeWord string) (*Cache, error) {
 // Методы для работы с пользовательскими сессиями
 func (d *Database) CreateOrUpdateUserSession(session *UserSession) error {
 	query := `INSERT OR REPLACE INTO user_sessions 
-			  (user_id, cache_id, last_latitude, last_longitude, last_message_id, is_active, last_update) 
-			  VALUES (?, ?, ?, ?, ?, ?, ?)`
+			  (user_id, cache_id, last_latitude, last_longitude, last_message_id, last_message_text, is_active, last_update) 
+			  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 
 	_, err := d.db.Exec(query, session.UserID, session.CacheID, session.LastLatitude,
-		session.LastLongitude, session.LastMessageID, session.IsActive, time.Now())
+		session.LastLongitude, session.LastMessageID, session.LastMessageText, session.IsActive, time.Now())
 	return err
 }
 
 func (d *Database) GetUserSession(userID int64) (*UserSession, error) {
-	query := `SELECT user_id, cache_id, last_latitude, last_longitude, last_message_id, is_active, last_update 
+	query := `SELECT user_id, cache_id, last_latitude, last_longitude, last_message_id, last_message_text, is_active, last_update 
 			  FROM user_sessions WHERE user_id = ? AND is_active = TRUE`
 
 	session := &UserSession{}
 	err := d.db.QueryRow(query, userID).Scan(
 		&session.UserID, &session.CacheID, &session.LastLatitude, &session.LastLongitude,
-		&session.LastMessageID, &session.IsActive, &session.LastUpdate,
+		&session.LastMessageID, &session.LastMessageText, &session.IsActive, &session.LastUpdate,
 	)
 
 	if err != nil {
