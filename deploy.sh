@@ -45,9 +45,30 @@ create_dirs() {
 
 # Сборка образа
 build() {
-    log "Сборка Docker образа..."
-    docker-compose build --no-cache
+    local dockerfile=${1:-"Dockerfile"}
+    local no_cache=${2:-""}
+    
+    log "Сборка Docker образа с $dockerfile..."
+    
+    if [ "$no_cache" = "--no-cache" ]; then
+        DOCKERFILE=$dockerfile docker-compose build --no-cache
+    else
+        DOCKERFILE=$dockerfile docker-compose build
+    fi
+    
     log "Образ успешно собран!"
+}
+
+# Быстрая сборка
+build_fast() {
+    log "Быстрая сборка с кэшированием..."
+    build "Dockerfile" ""
+}
+
+# Оптимизированная сборка
+build_optimized() {
+    log "Оптимизированная сборка..."
+    build "Dockerfile.optimized" ""
 }
 
 # Запуск сервисов
@@ -145,7 +166,13 @@ backup() {
 # Основная логика
 case "${1:-}" in
     build)
-        build
+        build "Dockerfile" "--no-cache"
+        ;;
+    build-fast)
+        build_fast
+        ;;
+    build-optimized)
+        build_optimized
         ;;
     start)
         start
@@ -177,8 +204,10 @@ case "${1:-}" in
         echo "Использование: $0 [команда]"
         echo
         echo "Доступные команды:"
-        echo "  build    - Собрать Docker образ"
-        echo "  start    - Запустить бота"
+        echo "  build              - Собрать Docker образ (полная пересборка)"
+        echo "  build-fast         - Быстрая сборка с кэшированием"
+        echo "  build-optimized    - Оптимизированная сборка (scratch образ)"
+        echo "  start              - Запустить бота"
         echo "  stop     - Остановить бота"
         echo "  restart  - Перезапустить бота"
         echo "  logs     - Показать логи"

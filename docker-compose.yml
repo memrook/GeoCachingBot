@@ -4,7 +4,9 @@ services:
   geocaching-bot:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+      args:
+        - BUILDKIT_INLINE_CACHE=1
     container_name: geocaching-bot
     restart: unless-stopped
     

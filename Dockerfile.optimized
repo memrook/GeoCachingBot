@@ -1,0 +1,57 @@
+# ОПТИМИЗИРОВАННАЯ ВЕРСИЯ DOCKERFILE
+# Использует кэширование и готовые образы для быстрой сборки
+
+# Используем scratch для минимального размера или distroless
+FROM golang:1.24-alpine AS builder
+
+# Устанавливаем только необходимые зависимости
+RUN apk add --no-cache \
+    gcc \
+    musl-dev \
+    sqlite-dev \
+    ca-certificates \
+    git
+
+WORKDIR /app
+
+# Копируем файлы зависимостей ПЕРВЫМИ для кэширования
+COPY go.mod go.sum ./
+
+# Кэшируемый слой с зависимостями
+RUN go mod download && go mod verify
+
+# Копируем исходный код
+COPY *.go ./
+
+# БЫСТРАЯ ОПТИМИЗИРОВАННАЯ СБОРКА
+RUN CGO_ENABLED=1 GOOS=linux go build \
+    -mod=readonly \
+    -ldflags='-w -s -extldflags "-static"' \
+    -tags 'sqlite_omit_load_extension netgo' \
+    -trimpath \
+    -o geocaching-bot
+
+# Минимальный финальный образ с busybox для создания директорий  
+FROM busybox:musl AS runtime
+
+# Создаем пользователя и директории
+RUN adduser -D -s /bin/sh geocaching && \
+    mkdir -p /app/data /app/photos /app/logs && \
+    chown -R geocaching:geocaching /app
+
+# Копируем сертификаты для HTTPS
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Копируем приложение
+COPY --from=builder /app/geocaching-bot /app/geocaching-bot
+
+# Устанавливаем права на выполнение
+RUN chmod +x /app/geocaching-bot
+
+# Переключаемся на непривилегированного пользователя
+USER geocaching
+
+WORKDIR /app
+
+# Запускаем
+ENTRYPOINT ["./geocaching-bot"] 

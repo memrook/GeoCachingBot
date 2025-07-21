@@ -1,5 +1,5 @@
 # Этап сборки
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Устанавливаем зависимости для SQLite
 RUN apk add --no-cache gcc musl-dev sqlite-dev
@@ -10,14 +10,17 @@ WORKDIR /app
 # Копируем go.mod и go.sum для кэширования зависимостей
 COPY go.mod go.sum ./
 
-# Скачиваем зависимости
-RUN go mod download
+# Скачиваем зависимости (кэшируется Docker)
+RUN go mod download && go mod verify
 
 # Копируем исходный код
 COPY . .
 
-# Собираем приложение
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o geocaching-bot .
+# Собираем приложение (ОПТИМИЗИРОВАННАЯ СБОРКА)
+RUN CGO_ENABLED=1 GOOS=linux go build \
+    -ldflags='-w -s -extldflags "-static"' \
+    -tags sqlite_omit_load_extension \
+    -o geocaching-bot .
 
 # Финальный этап
 FROM alpine:latest
