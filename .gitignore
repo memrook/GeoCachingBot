@@ -1,0 +1,46 @@
+# Переменные окружения (содержат токены и пароли)
+.env
+.env.local
+.env.*.local
+
+# База данных
+*.db
+*.sqlite
+*.sqlite3
+
+# Папка с фотографиями
+photos/
+images/
+
+# Логи
+*.log
+logs/
+
+# Бинарные файлы
+GeoCachingBot
+*.exe
+
+# Go специфичные файлы
+vendor/
+*.mod.sum
+
+# IDE файлы
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+
+# Linux
+*~
+
+# Временные файлы
+*.tmp
+*.temp 
