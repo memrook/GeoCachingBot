@@ -4,23 +4,23 @@ services:
   geocaching-bot:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+      args:
+        - BUILDKIT_INLINE_CACHE=1
     container_name: geocaching-bot
     restart: unless-stopped
     
-    # Переменные окружения
+    # Переменные окружения (загружаются из .env файла хоста)
     env_file:
       - .env
     
-    # Альтернативный способ задания переменных (закомментирован)
-    # environment:
-    #   - BOT_TOKEN=${BOT_TOKEN}
-    #   - ADMIN_ID=${ADMIN_ID}
-    #   - ADMIN_IDS=${ADMIN_IDS}
-    #   - DATABASE_PATH=${DATABASE_PATH:-/app/data/geocaching.db}
-    #   - PHOTO_STORAGE_PATH=${PHOTO_STORAGE_PATH:-/app/photos}
-    #   - LIVE_LOCATION_DURATION_HOURS=${LIVE_LOCATION_DURATION_HOURS:-2}
-    #   - TARGET_DISTANCE_METERS=${TARGET_DISTANCE_METERS:-200}
+    # Переменные с значениями по умолчанию для Docker
+    environment:
+      - DATABASE_PATH=${DATABASE_PATH:-/app/data/geocaching.db}
+      - PHOTO_STORAGE_PATH=${PHOTO_STORAGE_PATH:-/app/photos}
+      - LIVE_LOCATION_DURATION_HOURS=${LIVE_LOCATION_DURATION_HOURS:-1}
+      - TARGET_DISTANCE_METERS=${TARGET_DISTANCE_METERS:-200}
+      - UPDATE_INTERVAL_SECONDS=${UPDATE_INTERVAL_SECONDS:-5}
     
     # Монтируем тома для персистентности данных
     volumes:

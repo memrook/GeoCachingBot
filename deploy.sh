@@ -32,8 +32,67 @@ check_env() {
         echo "Скопируйте env.example в .env и настройте переменные:"
         echo "cp env.example .env"
         echo "nano .env"
+        echo ""
+        echo "Обязательно настройте:"
+        echo "  BOT_TOKEN=ваш_токен_от_BotFather"
+        echo "  ADMIN_ID=ваш_telegram_user_id"
         exit 1
     fi
+    
+    # Проверяем основные переменные
+    if ! grep -q "BOT_TOKEN=" .env || ! grep -q "^BOT_TOKEN=.*[^[:space:]]" .env; then
+        error "BOT_TOKEN не настроен в .env файле!"
+        echo "Получите токен от @BotFather и добавьте в .env:"
+        echo "BOT_TOKEN=ваш_токен_бота"
+        exit 1
+    fi
+    
+    if ! grep -q -E "(ADMIN_ID=|ADMIN_IDS=)" .env; then
+        error "ADMIN_ID или ADMIN_IDS не настроены в .env файле!"
+        echo "Получите ваш User ID от @userinfobot и добавьте в .env:"
+        echo "ADMIN_ID=ваш_telegram_user_id"
+        exit 1
+    fi
+    
+    log "✅ Конфигурация .env файла выглядит корректно"
+}
+
+# Быстрая настройка .env файла
+setup_env() {
+    if [ -f ".env" ]; then
+        warn "Файл .env уже существует!"
+        read -p "Перезаписать? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log "Настройка отменена."
+            return
+        fi
+    fi
+    
+    log "Создание .env файла из шаблона..."
+    cp env.example .env
+    
+    echo
+    echo "📝 Настройте следующие параметры в .env файле:"
+    echo
+    echo "1. BOT_TOKEN - получите от @BotFather:"
+    echo "   https://t.me/BotFather → /newbot"
+    echo
+    echo "2. ADMIN_ID - получите от @userinfobot:"
+    echo "   https://t.me/userinfobot → отправьте любое сообщение"
+    echo
+    
+    if command -v nano >/dev/null 2>&1; then
+        read -p "Открыть .env в редакторе nano? (Y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            nano .env
+        fi
+    else
+        echo "Отредактируйте файл .env любым текстовым редактором"
+    fi
+    
+    log "✅ Файл .env создан! Теперь можно запустить бота: ./deploy.sh start"
 }
 
 # Создаем необходимые директории
@@ -45,9 +104,30 @@ create_dirs() {
 
 # Сборка образа
 build() {
-    log "Сборка Docker образа..."
-    docker-compose build --no-cache
+    local dockerfile=${1:-"Dockerfile"}
+    local no_cache=${2:-""}
+    
+    log "Сборка Docker образа с $dockerfile..."
+    
+    if [ "$no_cache" = "--no-cache" ]; then
+        DOCKERFILE=$dockerfile docker-compose build --no-cache
+    else
+        DOCKERFILE=$dockerfile docker-compose build
+    fi
+    
     log "Образ успешно собран!"
+}
+
+# Быстрая сборка
+build_fast() {
+    log "Быстрая сборка с кэшированием..."
+    build "Dockerfile" ""
+}
+
+# Оптимизированная сборка
+build_optimized() {
+    log "Оптимизированная сборка..."
+    build "Dockerfile.optimized" ""
 }
 
 # Запуск сервисов
@@ -145,7 +225,13 @@ backup() {
 # Основная логика
 case "${1:-}" in
     build)
-        build
+        build "Dockerfile" "--no-cache"
+        ;;
+    build-fast)
+        build_fast
+        ;;
+    build-optimized)
+        build_optimized
         ;;
     start)
         start
@@ -171,20 +257,26 @@ case "${1:-}" in
     backup)
         backup
         ;;
+    setup)
+        setup_env
+        ;;
     *)
         echo -e "${BLUE}GeoCaching Bot - Deploy Script${NC}"
         echo
         echo "Использование: $0 [команда]"
         echo
         echo "Доступные команды:"
-        echo "  build    - Собрать Docker образ"
-        echo "  start    - Запустить бота"
+        echo "  build              - Собрать Docker образ (полная пересборка)"
+        echo "  build-fast         - Быстрая сборка с кэшированием"
+        echo "  build-optimized    - Оптимизированная сборка (scratch образ)"
+        echo "  start              - Запустить бота"
         echo "  stop     - Остановить бота"
         echo "  restart  - Перезапустить бота"
         echo "  logs     - Показать логи"
         echo "  status   - Показать статус"
         echo "  update   - Обновить (пересборка + перезапуск)"
         echo "  backup   - Создать бэкап данных"
+        echo "  setup    - Быстрая настройка .env файла"
         echo "  clean    - Полная очистка (ОСТОРОЖНО!)"
         echo
         echo "Примеры:"
