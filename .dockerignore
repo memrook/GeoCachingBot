@@ -1,0 +1,55 @@
+# Git
+.git
+.gitignore
+.github
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Environment variables (НЕ копируем в образ!)
+.env
+.env.local
+.env.*.local
+
+# Database and user data (будут монтироваться как volume)
+*.db
+*.sqlite
+*.sqlite3
+data/
+photos/
+images/
+
+# Logs
+*.log
+logs/
+
+# Documentation
+README.md
+*.md
+docs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+GeoCachingBot
+*.exe
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Test files
+*_test.go
+test/ 
