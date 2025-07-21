@@ -1,0 +1,76 @@
+# Docker Compose file for GeoCaching Bot
+
+services:
+  geocaching-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: geocaching-bot
+    restart: unless-stopped
+    
+    # Переменные окружения
+    env_file:
+      - .env
+    
+    # Альтернативный способ задания переменных (закомментирован)
+    # environment:
+    #   - BOT_TOKEN=${BOT_TOKEN}
+    #   - ADMIN_ID=${ADMIN_ID}
+    #   - ADMIN_IDS=${ADMIN_IDS}
+    #   - DATABASE_PATH=${DATABASE_PATH:-/app/data/geocaching.db}
+    #   - PHOTO_STORAGE_PATH=${PHOTO_STORAGE_PATH:-/app/photos}
+    #   - LIVE_LOCATION_DURATION_HOURS=${LIVE_LOCATION_DURATION_HOURS:-2}
+    #   - TARGET_DISTANCE_METERS=${TARGET_DISTANCE_METERS:-200}
+    
+    # Монтируем тома для персистентности данных
+    volumes:
+      - geocaching_data:/app/data        # База данных SQLite
+      - geocaching_photos:/app/photos    # Фотографии тайников
+      - ./logs:/app/logs:rw             # Логи (опционально)
+    
+    # Для мониторинга состояния контейнера
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "geocaching-bot"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Лимиты ресурсов
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    
+    # Лог конфигурация
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Именованные тома для персистентности данных
+volumes:
+  geocaching_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data
+  
+  geocaching_photos:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./photos
+
+# Сеть для изоляции (опционально)
+networks:
+  default:
+    name: geocaching-network
+    driver: bridge 
