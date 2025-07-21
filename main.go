@@ -4,16 +4,17 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
 )
 
 type Bot struct {
-	API     *tgbotapi.BotAPI
-	DB      *Database
-	AdminID int64
-	Config  *Config
+	API      *tgbotapi.BotAPI
+	DB       *Database
+	AdminIDs []int64
+	Config   *Config
 }
 
 type Config struct {
@@ -36,14 +37,13 @@ func main() {
 		log.Fatal("BOT_TOKEN не установлен в .env файле")
 	}
 
-	// Получаем ID администратора
-	adminIDStr := os.Getenv("ADMIN_ID")
-	if adminIDStr == "" {
-		log.Fatal("ADMIN_ID не установлен в .env файле")
-	}
-	adminID, err := strconv.ParseInt(adminIDStr, 10, 64)
+	// Получаем ID администраторов (поддерживаем как старый ADMIN_ID, так и новый ADMIN_IDS)
+	adminIDs, err := parseAdminIDs()
 	if err != nil {
-		log.Fatal("Неверный формат ADMIN_ID: ", err)
+		log.Fatal("Ошибка парсинга ID администраторов: ", err)
+	}
+	if len(adminIDs) == 0 {
+		log.Fatal("Не указан ни один ID администратора. Установите ADMIN_ID или ADMIN_IDS в .env файле")
 	}
 
 	// Создаем конфигурацию
@@ -83,10 +83,10 @@ func main() {
 
 	// Создаем экземпляр бота
 	geocachingBot := &Bot{
-		API:     bot,
-		DB:      db,
-		AdminID: adminID,
-		Config:  config,
+		API:      bot,
+		DB:       db,
+		AdminIDs: adminIDs,
+		Config:   config,
 	}
 
 	// Запускаем обработку обновлений
@@ -95,11 +95,48 @@ func main() {
 
 	updates := bot.GetUpdatesChan(u)
 
-	log.Println("Бот запущен...")
+	log.Printf("Бот запущен с %d администратором(ами)...", len(adminIDs))
 
 	for update := range updates {
 		go geocachingBot.handleUpdate(update)
 	}
+}
+
+// parseAdminIDs парсит ID администраторов из переменных окружения
+// Поддерживает как ADMIN_ID (один ID), так и ADMIN_IDS (несколько ID через запятую)
+func parseAdminIDs() ([]int64, error) {
+	var adminIDs []int64
+
+	// Сначала проверяем новый формат ADMIN_IDS (несколько ID через запятую)
+	adminIDsStr := os.Getenv("ADMIN_IDS")
+	if adminIDsStr != "" {
+		parts := strings.Split(adminIDsStr, ",")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				id, err := strconv.ParseInt(part, 10, 64)
+				if err != nil {
+					return nil, err
+				}
+				adminIDs = append(adminIDs, id)
+			}
+		}
+		return adminIDs, nil
+	}
+
+	// Если ADMIN_IDS не установлен, проверяем старый формат ADMIN_ID
+	adminIDStr := os.Getenv("ADMIN_ID")
+	if adminIDStr != "" {
+		id, err := strconv.ParseInt(adminIDStr, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		adminIDs = append(adminIDs, id)
+		return adminIDs, nil
+	}
+
+	// Если ни один не установлен, возвращаем пустой слайс
+	return adminIDs, nil
 }
 
 func getEnvString(key, defaultValue string) string {

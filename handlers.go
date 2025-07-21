@@ -28,7 +28,7 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 	userID := message.From.ID
 
 	// Проверяем, является ли пользователь администратором
-	if userID == b.AdminID {
+	if b.isAdmin(userID) {
 		b.handleAdminMessage(message)
 		return
 	}
@@ -121,12 +121,14 @@ func (b *Bot) handleCodeWordInput(userID int64, codeWord string) {
 	}
 
 	msg := tgbotapi.NewMessage(userID, "📍 Отлично! Теперь отправьте геолокацию места, где будет спрятан кэш.")
-	msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+
+	keyboard := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButtonLocation("📍 Отправить геолокацию"),
 		),
 	)
-	msg.ReplyMarkup.OneTimeKeyboard = true
+	keyboard.OneTimeKeyboard = true
+	msg.ReplyMarkup = keyboard
 
 	b.API.Send(msg)
 }
@@ -295,12 +297,13 @@ func (b *Bot) handleCacheSearch(userID int64, codeWord string) {
 	msg := tgbotapi.NewMessage(userID, fmt.Sprintf("🎯 Кэш найден: %s\n\n📍 Для начала поиска поделитесь своей геолокацией в реальном времени на %d час(а).",
 		cache.CodeWord, b.Config.LiveLocationDurationHours))
 
-	msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+	keyboard := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButtonLocation("📍 Поделиться геолокацией"),
 		),
 	)
-	msg.ReplyMarkup.OneTimeKeyboard = true
+	keyboard.OneTimeKeyboard = true
+	msg.ReplyMarkup = keyboard
 
 	b.API.Send(msg)
 }
@@ -417,6 +420,16 @@ func (b *Bot) handleStopCommand(userID int64) {
 	msg := tgbotapi.NewMessage(userID, "🛑 Поиск кэша остановлен.\n\nВведите новое кодовое слово для начала поиска.")
 	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
 	b.API.Send(msg)
+}
+
+// isAdmin проверяет, является ли пользователь администратором
+func (b *Bot) isAdmin(userID int64) bool {
+	for _, adminID := range b.AdminIDs {
+		if userID == adminID {
+			return true
+		}
+	}
+	return false
 }
 
 // Вспомогательная функция для отправки текстовых сообщений
