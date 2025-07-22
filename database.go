@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"log"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -142,25 +143,75 @@ func (d *Database) migrate() error {
 		}
 	}
 
-	// Если есть старая схема, но нет новых полей - выполняем миграцию
+	// Если есть старая схема, но нет новых полей - выполняем полную миграцию
 	if hasPhotoPath && (!hasFileID || !hasFileType) {
-		migrations := []string{
-			"ALTER TABLE caches ADD COLUMN file_id TEXT DEFAULT '';",
-			"ALTER TABLE caches ADD COLUMN file_type TEXT DEFAULT 'photo';",
-			// Помечаем старые записи как photo (file_id останется пустым для старых записей)
-			"UPDATE caches SET file_type = 'photo' WHERE file_type = '' OR file_type IS NULL;",
-		}
-
-		for _, migration := range migrations {
-			_, err := d.db.Exec(migration)
-			if err != nil {
-				// Логируем ошибки, но продолжаем работу
-				// (возможно, колонки уже существуют)
-				continue
-			}
-		}
+		return d.migrateToNewSchema()
 	}
 
+	return nil
+}
+
+// migrateToNewSchema выполняет полную миграцию таблицы caches
+func (d *Database) migrateToNewSchema() error {
+	log.Println("Начинаем миграцию базы данных...")
+
+	// Начинаем транзакцию
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Создаем новую таблицу с правильной структурой
+	newCacheTable := `
+	CREATE TABLE caches_new (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		code_word TEXT UNIQUE NOT NULL,
+		latitude REAL NOT NULL,
+		longitude REAL NOT NULL,
+		file_id TEXT NOT NULL DEFAULT '',
+		file_type TEXT NOT NULL DEFAULT 'photo',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		created_by INTEGER NOT NULL
+	);`
+
+	_, err = tx.Exec(newCacheTable)
+	if err != nil {
+		return err
+	}
+
+	// Копируем существующие данные из старой таблицы (если они есть)
+	// Устанавливаем file_id как пустую строку и file_type как 'photo' для старых записей
+	copyData := `
+	INSERT INTO caches_new (id, code_word, latitude, longitude, file_id, file_type, created_at, created_by)
+	SELECT id, code_word, latitude, longitude, '', 'photo', created_at, created_by 
+	FROM caches;`
+
+	_, err = tx.Exec(copyData)
+	if err != nil {
+		// Если ошибка копирования, возможно таблица пустая - это нормально
+		// Продолжаем без ошибки
+	}
+
+	// Удаляем старую таблицу
+	_, err = tx.Exec("DROP TABLE caches;")
+	if err != nil {
+		return err
+	}
+
+	// Переименовываем новую таблицу
+	_, err = tx.Exec("ALTER TABLE caches_new RENAME TO caches;")
+	if err != nil {
+		return err
+	}
+
+	// Подтверждаем транзакцию
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+
+	log.Println("Миграция базы данных успешно завершена!")
 	return nil
 }
 
