@@ -83,8 +83,6 @@ func (b *Bot) handleAdminMessage(message *tgbotapi.Message) {
 		b.handleLocationInput(userID, message)
 	case "waiting_media":
 		b.handleMediaInput(userID, message)
-	case "waiting_photo": // Обратная совместимость со старыми сессиями
-		b.handleMediaInput(userID, message)
 	}
 }
 

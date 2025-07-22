@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"log"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -51,11 +50,6 @@ func NewDatabase(dataSourceName string) (*Database, error) {
 	database := &Database{db: db}
 
 	if err := database.createTables(); err != nil {
-		return nil, err
-	}
-
-	// Выполняем миграцию для обновления схемы
-	if err := database.migrate(); err != nil {
 		return nil, err
 	}
 
@@ -108,110 +102,6 @@ func (d *Database) createTables() error {
 		}
 	}
 
-	return nil
-}
-
-// migrate выполняет миграцию базы данных для обновления схемы
-func (d *Database) migrate() error {
-	// Проверяем, существует ли старая колонка photo_path
-	rows, err := d.db.Query("PRAGMA table_info(caches)")
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	var hasPhotoPath, hasFileID, hasFileType bool
-
-	for rows.Next() {
-		var cid int
-		var name, dataType string
-		var notNull, pk int
-		var defaultValue interface{}
-
-		err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &pk)
-		if err != nil {
-			continue
-		}
-
-		switch name {
-		case "photo_path":
-			hasPhotoPath = true
-		case "file_id":
-			hasFileID = true
-		case "file_type":
-			hasFileType = true
-		}
-	}
-
-	// Если есть старая схема, но нет новых полей - выполняем полную миграцию
-	if hasPhotoPath && (!hasFileID || !hasFileType) {
-		return d.migrateToNewSchema()
-	}
-
-	return nil
-}
-
-// migrateToNewSchema выполняет полную миграцию таблицы caches
-func (d *Database) migrateToNewSchema() error {
-	log.Println("Начинаем миграцию базы данных...")
-
-	// Начинаем транзакцию
-	tx, err := d.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Создаем новую таблицу с правильной структурой
-	newCacheTable := `
-	CREATE TABLE caches_new (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		code_word TEXT UNIQUE NOT NULL,
-		latitude REAL NOT NULL,
-		longitude REAL NOT NULL,
-		file_id TEXT NOT NULL DEFAULT '',
-		file_type TEXT NOT NULL DEFAULT 'photo',
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		created_by INTEGER NOT NULL
-	);`
-
-	_, err = tx.Exec(newCacheTable)
-	if err != nil {
-		return err
-	}
-
-	// Копируем существующие данные из старой таблицы (если они есть)
-	// Устанавливаем file_id как пустую строку и file_type как 'photo' для старых записей
-	copyData := `
-	INSERT INTO caches_new (id, code_word, latitude, longitude, file_id, file_type, created_at, created_by)
-	SELECT id, code_word, latitude, longitude, '', 'photo', created_at, created_by 
-	FROM caches;`
-
-	_, err = tx.Exec(copyData)
-	if err != nil {
-		// Если ошибка копирования, возможно таблица пустая - это нормально
-		// Продолжаем без ошибки
-	}
-
-	// Удаляем старую таблицу
-	_, err = tx.Exec("DROP TABLE caches;")
-	if err != nil {
-		return err
-	}
-
-	// Переименовываем новую таблицу
-	_, err = tx.Exec("ALTER TABLE caches_new RENAME TO caches;")
-	if err != nil {
-		return err
-	}
-
-	// Подтверждаем транзакцию
-	err = tx.Commit()
-	if err != nil {
-		return err
-	}
-
-	log.Println("Миграция базы данных успешно завершена!")
 	return nil
 }
 
