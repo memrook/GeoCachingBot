@@ -36,7 +36,7 @@ FROM busybox:musl AS runtime
 
 # Создаем пользователя и директории
 RUN adduser -D -s /bin/sh geocaching && \
-    mkdir -p /app/data /app/photos /app/logs && \
+    mkdir -p /app/data /app/logs && \
     chown -R geocaching:geocaching /app
 
 # Копируем сертификаты для HTTPS

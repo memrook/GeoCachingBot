@@ -17,7 +17,6 @@ services:
     # Переменные с значениями по умолчанию для Docker
     environment:
       - DATABASE_PATH=${DATABASE_PATH:-/app/data/geocaching.db}
-      - PHOTO_STORAGE_PATH=${PHOTO_STORAGE_PATH:-/app/photos}
       - LIVE_LOCATION_DURATION_HOURS=${LIVE_LOCATION_DURATION_HOURS:-1}
       - TARGET_DISTANCE_METERS=${TARGET_DISTANCE_METERS:-200}
       - UPDATE_INTERVAL_SECONDS=${UPDATE_INTERVAL_SECONDS:-5}
@@ -25,7 +24,6 @@ services:
     # Монтируем тома для персистентности данных
     volumes:
       - geocaching_data:/app/data        # База данных SQLite
-      - geocaching_photos:/app/photos    # Фотографии тайников
       - ./logs:/app/logs:rw             # Логи (опционально)
     
     # Для мониторинга состояния контейнера
@@ -44,7 +42,6 @@ services:
           cpus: '0.5'
         reservations:
           memory: 128M
-          cpus: '0.1'
     
     # Лог конфигурация
     logging:
@@ -61,13 +58,6 @@ volumes:
       type: none
       o: bind
       device: ./data
-  
-  geocaching_photos:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ./photos
 
 # Сеть для изоляции (опционально)
 networks:

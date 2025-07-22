@@ -98,8 +98,8 @@ setup_env() {
 # Создаем необходимые директории
 create_dirs() {
     log "Создание необходимых директорий..."
-    mkdir -p data photos logs
-    chmod 755 data photos logs
+    mkdir -p data logs
+    chmod 755 data logs
 }
 
 # Сборка образа
@@ -207,11 +207,7 @@ backup() {
         log "База данных скопирована"
     fi
     
-    # Бэкап фотографий
-    if [ -d "photos" ]; then
-        cp -r photos "$BACKUP_DIR/"
-        log "Фотографии скопированы"
-    fi
+
     
     # Бэкап конфигурации
     if [ -f ".env" ]; then

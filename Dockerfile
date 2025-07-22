@@ -35,7 +35,7 @@ RUN adduser -D -s /bin/sh geocaching
 WORKDIR /app
 
 # Создаем необходимые директории
-RUN mkdir -p /app/photos /app/data && \
+RUN mkdir -p /app/data && \
     chown -R geocaching:geocaching /app
 
 # Копируем собранное приложение
