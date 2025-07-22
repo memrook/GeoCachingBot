@@ -16,7 +16,8 @@ type Cache struct {
 	CodeWord  string    `json:"code_word"`
 	Latitude  float64   `json:"latitude"`
 	Longitude float64   `json:"longitude"`
-	PhotoPath string    `json:"photo_path"`
+	FileID    string    `json:"file_id"`   // Telegram file_id
+	FileType  string    `json:"file_type"` // "photo", "video", "video_note"
 	CreatedAt time.Time `json:"created_at"`
 	CreatedBy int64     `json:"created_by"`
 }
@@ -52,6 +53,11 @@ func NewDatabase(dataSourceName string) (*Database, error) {
 		return nil, err
 	}
 
+	// Выполняем миграцию для обновления схемы
+	if err := database.migrate(); err != nil {
+		return nil, err
+	}
+
 	return database, nil
 }
 
@@ -63,7 +69,8 @@ func (d *Database) createTables() error {
 		code_word TEXT UNIQUE NOT NULL,
 		latitude REAL NOT NULL,
 		longitude REAL NOT NULL,
-		photo_path TEXT NOT NULL,
+		file_id TEXT NOT NULL,
+		file_type TEXT NOT NULL DEFAULT 'photo',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		created_by INTEGER NOT NULL
 	);`
@@ -103,16 +110,70 @@ func (d *Database) createTables() error {
 	return nil
 }
 
+// migrate выполняет миграцию базы данных для обновления схемы
+func (d *Database) migrate() error {
+	// Проверяем, существует ли старая колонка photo_path
+	rows, err := d.db.Query("PRAGMA table_info(caches)")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var hasPhotoPath, hasFileID, hasFileType bool
+
+	for rows.Next() {
+		var cid int
+		var name, dataType string
+		var notNull, pk int
+		var defaultValue interface{}
+
+		err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &pk)
+		if err != nil {
+			continue
+		}
+
+		switch name {
+		case "photo_path":
+			hasPhotoPath = true
+		case "file_id":
+			hasFileID = true
+		case "file_type":
+			hasFileType = true
+		}
+	}
+
+	// Если есть старая схема, но нет новых полей - выполняем миграцию
+	if hasPhotoPath && (!hasFileID || !hasFileType) {
+		migrations := []string{
+			"ALTER TABLE caches ADD COLUMN file_id TEXT DEFAULT '';",
+			"ALTER TABLE caches ADD COLUMN file_type TEXT DEFAULT 'photo';",
+			// Помечаем старые записи как photo (file_id останется пустым для старых записей)
+			"UPDATE caches SET file_type = 'photo' WHERE file_type = '' OR file_type IS NULL;",
+		}
+
+		for _, migration := range migrations {
+			_, err := d.db.Exec(migration)
+			if err != nil {
+				// Логируем ошибки, но продолжаем работу
+				// (возможно, колонки уже существуют)
+				continue
+			}
+		}
+	}
+
+	return nil
+}
+
 func (d *Database) Close() error {
 	return d.db.Close()
 }
 
 // Методы для работы с тайниками
 func (d *Database) CreateCache(cache *Cache) error {
-	query := `INSERT INTO caches (code_word, latitude, longitude, photo_path, created_by) 
-			  VALUES (?, ?, ?, ?, ?)`
+	query := `INSERT INTO caches (code_word, latitude, longitude, file_id, file_type, created_by) 
+			  VALUES (?, ?, ?, ?, ?, ?)`
 
-	result, err := d.db.Exec(query, cache.CodeWord, cache.Latitude, cache.Longitude, cache.PhotoPath, cache.CreatedBy)
+	result, err := d.db.Exec(query, cache.CodeWord, cache.Latitude, cache.Longitude, cache.FileID, cache.FileType, cache.CreatedBy)
 	if err != nil {
 		return err
 	}
@@ -127,13 +188,13 @@ func (d *Database) CreateCache(cache *Cache) error {
 }
 
 func (d *Database) GetCacheByCodeWord(codeWord string) (*Cache, error) {
-	query := `SELECT id, code_word, latitude, longitude, photo_path, created_at, created_by 
+	query := `SELECT id, code_word, latitude, longitude, file_id, file_type, created_at, created_by 
 			  FROM caches WHERE code_word = ?`
 
 	cache := &Cache{}
 	err := d.db.QueryRow(query, codeWord).Scan(
 		&cache.ID, &cache.CodeWord, &cache.Latitude, &cache.Longitude,
-		&cache.PhotoPath, &cache.CreatedAt, &cache.CreatedBy,
+		&cache.FileID, &cache.FileType, &cache.CreatedAt, &cache.CreatedBy,
 	)
 
 	if err != nil {

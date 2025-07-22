@@ -18,7 +18,6 @@ type Bot struct {
 }
 
 type Config struct {
-	PhotoStoragePath          string
 	TargetDistanceMeters      float64
 	UpdateIntervalSeconds     int
 	LiveLocationDurationHours int
@@ -48,16 +47,9 @@ func main() {
 
 	// Создаем конфигурацию
 	config := &Config{
-		PhotoStoragePath:          getEnvString("PHOTO_STORAGE_PATH", "./photos/"),
 		TargetDistanceMeters:      getEnvFloat("TARGET_DISTANCE_METERS", 200),
 		UpdateIntervalSeconds:     getEnvInt("UPDATE_INTERVAL_SECONDS", 5),
 		LiveLocationDurationHours: getEnvInt("LIVE_LOCATION_DURATION_HOURS", 1),
-	}
-
-	// Создаем папку для фотографий
-	err = os.MkdirAll(config.PhotoStoragePath, 0755)
-	if err != nil {
-		log.Fatal("Ошибка создания папки для фотографий: ", err)
 	}
 
 	// Инициализируем бота

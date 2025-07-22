@@ -3,13 +3,8 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -190,6 +185,7 @@ func (b *Bot) handleLocationInput(userID int64, message *tgbotapi.Message) {
 // Обработчик ввода медиафайла (фото или видео)
 func (b *Bot) handleMediaInput(userID int64, message *tgbotapi.Message) {
 	var fileID string
+	var fileType string
 	var mediaType string
 
 	// Проверяем тип медиафайла
@@ -197,12 +193,15 @@ func (b *Bot) handleMediaInput(userID int64, message *tgbotapi.Message) {
 		// Получаем файл с наибольшим разрешением
 		photo := message.Photo[len(message.Photo)-1]
 		fileID = photo.FileID
+		fileType = "photo"
 		mediaType = "фотографию"
 	} else if message.Video != nil {
 		fileID = message.Video.FileID
+		fileType = "video"
 		mediaType = "видео"
 	} else if message.VideoNote != nil {
 		fileID = message.VideoNote.FileID
+		fileType = "video_note"
 		mediaType = "видео-заметку"
 	} else {
 		b.sendMessage(userID, "Пожалуйста, отправьте фотографию, видео или видео-заметку.")
@@ -217,29 +216,13 @@ func (b *Bot) handleMediaInput(userID int64, message *tgbotapi.Message) {
 		return
 	}
 
-	// Получаем информацию о файле
-	fileConfig := tgbotapi.FileConfig{FileID: fileID}
-	file, err := b.API.GetFile(fileConfig)
-	if err != nil {
-		log.Printf("Ошибка получения файла: %v", err)
-		b.sendMessage(userID, fmt.Sprintf("Ошибка при загрузке медиафайла. Попробуйте еще раз."))
-		return
-	}
-
-	// Скачиваем и сохраняем медиафайл
-	mediaPath, err := b.downloadAndSaveMedia(file.FilePath, session.CodeWord)
-	if err != nil {
-		log.Printf("Ошибка сохранения медиафайла: %v", err)
-		b.sendMessage(userID, fmt.Sprintf("Ошибка при сохранении медиафайла. Попробуйте еще раз."))
-		return
-	}
-
-	// Создаем запись в базе данных
+	// Создаем запись в базе данных (без скачивания файла)
 	cache := &Cache{
 		CodeWord:  session.CodeWord,
 		Latitude:  session.Latitude,
 		Longitude: session.Longitude,
-		PhotoPath: mediaPath, // Используем то же поле для хранения пути к медиафайлу
+		FileID:    fileID,   // Сохраняем file_id вместо пути к файлу
+		FileType:  fileType, // Сохраняем тип файла
 		CreatedBy: userID,
 	}
 
@@ -377,23 +360,19 @@ func (b *Bot) handleLocationUpdate(userID int64, message *tgbotapi.Message) {
 		return
 	}
 
-	// Получаем данные кэша
-	cache, err := b.DB.GetCacheByCodeWord("")
+	// Получаем данные кэша по ID из сессии
+	query := `SELECT id, code_word, latitude, longitude, file_id, file_type, created_at, created_by 
+			  FROM caches WHERE id = ?`
+
+	cache := &Cache{}
+	err = b.DB.db.QueryRow(query, session.CacheID).Scan(
+		&cache.ID, &cache.CodeWord, &cache.Latitude, &cache.Longitude,
+		&cache.FileID, &cache.FileType, &cache.CreatedAt, &cache.CreatedBy,
+	)
+
 	if err != nil {
-		// Получаем кэш по ID из сессии
-		query := `SELECT id, code_word, latitude, longitude, photo_path, created_at, created_by 
-				  FROM caches WHERE id = ?`
-
-		cache = &Cache{}
-		err = b.DB.db.QueryRow(query, session.CacheID).Scan(
-			&cache.ID, &cache.CodeWord, &cache.Latitude, &cache.Longitude,
-			&cache.PhotoPath, &cache.CreatedAt, &cache.CreatedBy,
-		)
-
-		if err != nil {
-			log.Printf("Ошибка получения кэша: %v", err)
-			return
-		}
+		log.Printf("Ошибка получения кэша: %v", err)
+		return
 	}
 
 	userLat := float64(message.Location.Latitude)
@@ -468,22 +447,16 @@ func (b *Bot) handleTargetReached(userID int64, cache *Cache) {
 	// Деактивируем сессию
 	b.DB.DeactivateUserSession(userID)
 
-	// Определяем тип медиафайла по расширению и имени файла
-	ext := strings.ToLower(filepath.Ext(cache.PhotoPath))
-	fileName := strings.ToLower(filepath.Base(cache.PhotoPath))
-
-	isVideo := ext == ".mp4" || ext == ".mov" || ext == ".avi" || ext == ".mkv" ||
-		ext == ".webm" || ext == ".m4v" || ext == ".3gp" || ext == ".flv"
-
-	// Проверяем, является ли это видео-заметкой (круглое видео)
-	isVideoNote := ext == ".mp4" && strings.Contains(fileName, "videonote")
-
+	// Определяем тип медиафайла по сохраненному типу
 	var mediaTypeText string
-	if isVideoNote {
+	switch cache.FileType {
+	case "video_note":
 		mediaTypeText = "🎥 Вот видео-заметка места:"
-	} else if isVideo {
+	case "video":
 		mediaTypeText = "🎥 Вот видео места:"
-	} else {
+	case "photo":
+		fallthrough
+	default:
 		mediaTypeText = "📷 Вот фотография места:"
 	}
 
@@ -494,11 +467,12 @@ func (b *Bot) handleTargetReached(userID int64, cache *Cache) {
 	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
 	b.API.Send(msg)
 
-	// Отправляем медиафайл
+	// Отправляем медиафайл используя file_id
 	caption := "🏆 Поиск завершен! Введите новое кодовое слово для следующего тайника."
 
-	if isVideoNote {
-		videoNoteMsg := tgbotapi.NewVideoNote(userID, 0, tgbotapi.FilePath(cache.PhotoPath))
+	switch cache.FileType {
+	case "video_note":
+		videoNoteMsg := tgbotapi.NewVideoNote(userID, 0, tgbotapi.FileID(cache.FileID))
 		_, err := b.API.Send(videoNoteMsg)
 		if err != nil {
 			log.Printf("Ошибка отправки видео-заметки: %v", err)
@@ -506,16 +480,18 @@ func (b *Bot) handleTargetReached(userID int64, cache *Cache) {
 		}
 		// Отправляем текст отдельно, так как видео-заметки не поддерживают подписи
 		b.sendMessage(userID, caption)
-	} else if isVideo {
-		videoMsg := tgbotapi.NewVideo(userID, tgbotapi.FilePath(cache.PhotoPath))
+	case "video":
+		videoMsg := tgbotapi.NewVideo(userID, tgbotapi.FileID(cache.FileID))
 		videoMsg.Caption = caption
 		_, err := b.API.Send(videoMsg)
 		if err != nil {
 			log.Printf("Ошибка отправки видео: %v", err)
 			b.sendMessage(userID, "К сожалению, не удалось загрузить видео места.")
 		}
-	} else {
-		photoMsg := tgbotapi.NewPhoto(userID, tgbotapi.FilePath(cache.PhotoPath))
+	case "photo":
+		fallthrough
+	default:
+		photoMsg := tgbotapi.NewPhoto(userID, tgbotapi.FileID(cache.FileID))
 		photoMsg.Caption = caption
 		_, err := b.API.Send(photoMsg)
 		if err != nil {
@@ -603,44 +579,4 @@ func (b *Bot) sendMessage(chatID int64, text string) {
 	if err != nil {
 		log.Printf("Ошибка отправки сообщения: %v", err)
 	}
-}
-
-// Функция для скачивания и сохранения медиафайла (фото, видео или видео-заметка)
-func (b *Bot) downloadAndSaveMedia(filePath, codeWord string) (string, error) {
-	// Получаем URL файла
-	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", b.API.Token, filePath)
-
-	// Скачиваем файл
-	resp, err := http.Get(fileURL)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	// Определяем тип файла для правильного именования
-	var fileName string
-	if strings.Contains(filePath, "video_note") {
-		// Это видео-заметка
-		fileName = fmt.Sprintf("%s_%d_videonote%s", codeWord, time.Now().Unix(), filepath.Ext(filePath))
-	} else {
-		// Обычный файл (фото или видео)
-		fileName = fmt.Sprintf("%s_%d%s", codeWord, time.Now().Unix(), filepath.Ext(filePath))
-	}
-
-	fullPath := filepath.Join(b.Config.PhotoStoragePath, fileName)
-
-	// Создаем файл
-	out, err := os.Create(fullPath)
-	if err != nil {
-		return "", err
-	}
-	defer out.Close()
-
-	// Копируем данные
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	return fullPath, nil
 }
