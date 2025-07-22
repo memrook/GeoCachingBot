@@ -34,7 +34,7 @@ type UserSession struct {
 
 type AdminSession struct {
 	UserID    int64   `json:"user_id"`
-	Step      string  `json:"step"` // "waiting_code", "waiting_location", "waiting_photo"
+	Step      string  `json:"step"` // "waiting_code", "waiting_location", "waiting_media"
 	CodeWord  string  `json:"code_word"`
 	Latitude  float64 `json:"latitude"`
 	Longitude float64 `json:"longitude"`

@@ -86,8 +86,10 @@ func (b *Bot) handleAdminMessage(message *tgbotapi.Message) {
 		b.handleCodeWordInput(userID, message.Text)
 	case "waiting_location":
 		b.handleLocationInput(userID, message)
-	case "waiting_photo":
-		b.handlePhotoInput(userID, message)
+	case "waiting_media":
+		b.handleMediaInput(userID, message)
+	case "waiting_photo": // Обратная совместимость со старыми сессиями
+		b.handleMediaInput(userID, message)
 	}
 }
 
@@ -168,7 +170,7 @@ func (b *Bot) handleLocationInput(userID int64, message *tgbotapi.Message) {
 		return
 	}
 
-	session.Step = "waiting_photo"
+	session.Step = "waiting_media"
 	session.Latitude = latitude
 	session.Longitude = longitude
 
@@ -180,15 +182,30 @@ func (b *Bot) handleLocationInput(userID int64, message *tgbotapi.Message) {
 	}
 
 	// Убираем клавиатуру
-	msg := tgbotapi.NewMessage(userID, "📷 Теперь отправьте фотографию этого места:")
+	msg := tgbotapi.NewMessage(userID, "📷🎥 Теперь отправьте фотографию, видео или видео-заметку этого места:")
 	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
 	b.API.Send(msg)
 }
 
-// Обработчик ввода фотографии
-func (b *Bot) handlePhotoInput(userID int64, message *tgbotapi.Message) {
-	if message.Photo == nil || len(message.Photo) == 0 {
-		b.sendMessage(userID, "Пожалуйста, отправьте фотографию.")
+// Обработчик ввода медиафайла (фото или видео)
+func (b *Bot) handleMediaInput(userID int64, message *tgbotapi.Message) {
+	var fileID string
+	var mediaType string
+
+	// Проверяем тип медиафайла
+	if message.Photo != nil && len(message.Photo) > 0 {
+		// Получаем файл с наибольшим разрешением
+		photo := message.Photo[len(message.Photo)-1]
+		fileID = photo.FileID
+		mediaType = "фотографию"
+	} else if message.Video != nil {
+		fileID = message.Video.FileID
+		mediaType = "видео"
+	} else if message.VideoNote != nil {
+		fileID = message.VideoNote.FileID
+		mediaType = "видео-заметку"
+	} else {
+		b.sendMessage(userID, "Пожалуйста, отправьте фотографию, видео или видео-заметку.")
 		return
 	}
 
@@ -200,21 +217,20 @@ func (b *Bot) handlePhotoInput(userID int64, message *tgbotapi.Message) {
 		return
 	}
 
-	// Получаем файл с наибольшим разрешением
-	photo := message.Photo[len(message.Photo)-1]
-	fileConfig := tgbotapi.FileConfig{FileID: photo.FileID}
+	// Получаем информацию о файле
+	fileConfig := tgbotapi.FileConfig{FileID: fileID}
 	file, err := b.API.GetFile(fileConfig)
 	if err != nil {
 		log.Printf("Ошибка получения файла: %v", err)
-		b.sendMessage(userID, "Ошибка при загрузке фотографии. Попробуйте еще раз.")
+		b.sendMessage(userID, fmt.Sprintf("Ошибка при загрузке медиафайла. Попробуйте еще раз."))
 		return
 	}
 
-	// Скачиваем и сохраняем фотографию
-	photoPath, err := b.downloadAndSavePhoto(file.FilePath, session.CodeWord)
+	// Скачиваем и сохраняем медиафайл
+	mediaPath, err := b.downloadAndSaveMedia(file.FilePath, session.CodeWord)
 	if err != nil {
-		log.Printf("Ошибка сохранения фотографии: %v", err)
-		b.sendMessage(userID, "Ошибка при сохранении фотографии. Попробуйте еще раз.")
+		log.Printf("Ошибка сохранения медиафайла: %v", err)
+		b.sendMessage(userID, fmt.Sprintf("Ошибка при сохранении медиафайла. Попробуйте еще раз."))
 		return
 	}
 
@@ -223,7 +239,7 @@ func (b *Bot) handlePhotoInput(userID int64, message *tgbotapi.Message) {
 		CodeWord:  session.CodeWord,
 		Latitude:  session.Latitude,
 		Longitude: session.Longitude,
-		PhotoPath: photoPath,
+		PhotoPath: mediaPath, // Используем то же поле для хранения пути к медиафайлу
 		CreatedBy: userID,
 	}
 
@@ -237,8 +253,8 @@ func (b *Bot) handlePhotoInput(userID int64, message *tgbotapi.Message) {
 	// Удаляем сессию
 	b.DB.DeleteAdminSession(userID)
 
-	successMsg := fmt.Sprintf("✅ Тайник успешно создан!\n\n🔑 Кодовое слово: %s\n📍 Координаты: %.6f, %.6f\n\nТеперь пользователи могут найти этот тайник, введя кодовое слово.",
-		cache.CodeWord, cache.Latitude, cache.Longitude)
+	successMsg := fmt.Sprintf("✅ Тайник успешно создан!\n\n🔑 Кодовое слово: %s\n📍 Координаты: %.6f, %.6f\n📱 Медиафайл: %s\n\nТеперь пользователи могут найти этот тайник, введя кодовое слово.",
+		cache.CodeWord, cache.Latitude, cache.Longitude, mediaType)
 
 	b.sendMessage(userID, successMsg)
 }
@@ -452,21 +468,60 @@ func (b *Bot) handleTargetReached(userID int64, cache *Cache) {
 	// Деактивируем сессию
 	b.DB.DeactivateUserSession(userID)
 
+	// Определяем тип медиафайла по расширению и имени файла
+	ext := strings.ToLower(filepath.Ext(cache.PhotoPath))
+	fileName := strings.ToLower(filepath.Base(cache.PhotoPath))
+
+	isVideo := ext == ".mp4" || ext == ".mov" || ext == ".avi" || ext == ".mkv" ||
+		ext == ".webm" || ext == ".m4v" || ext == ".3gp" || ext == ".flv"
+
+	// Проверяем, является ли это видео-заметкой (круглое видео)
+	isVideoNote := ext == ".mp4" && strings.Contains(fileName, "videonote")
+
+	var mediaTypeText string
+	if isVideoNote {
+		mediaTypeText = "🎥 Вот видео-заметка места:"
+	} else if isVideo {
+		mediaTypeText = "🎥 Вот видео места:"
+	} else {
+		mediaTypeText = "📷 Вот фотография места:"
+	}
+
 	// Отправляем поздравительное сообщение
-	congratsMsg := fmt.Sprintf("🎉 Поздравляем! Вы нашли тайник: %s\n\n📷 Вот фотография места:\n\n💡 Вы можете остановить передачу геолокации и начать поиск нового тайника!", cache.CodeWord)
+	congratsMsg := fmt.Sprintf("🎉 Поздравляем! Вы нашли тайник: %s\n\n%s\n\n💡 Вы можете остановить передачу геолокации и начать поиск нового тайника!", cache.CodeWord, mediaTypeText)
 
 	msg := tgbotapi.NewMessage(userID, congratsMsg)
 	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
 	b.API.Send(msg)
 
-	// Отправляем фотографию
-	photoMsg := tgbotapi.NewPhoto(userID, tgbotapi.FilePath(cache.PhotoPath))
-	photoMsg.Caption = "🏆 Поиск завершен! Введите новое кодовое слово для следующего тайника."
+	// Отправляем медиафайл
+	caption := "🏆 Поиск завершен! Введите новое кодовое слово для следующего тайника."
 
-	_, err := b.API.Send(photoMsg)
-	if err != nil {
-		log.Printf("Ошибка отправки фотографии: %v", err)
-		b.sendMessage(userID, "К сожалению, не удалось загрузить фотографию места.")
+	if isVideoNote {
+		videoNoteMsg := tgbotapi.NewVideoNote(userID, 0, tgbotapi.FilePath(cache.PhotoPath))
+		_, err := b.API.Send(videoNoteMsg)
+		if err != nil {
+			log.Printf("Ошибка отправки видео-заметки: %v", err)
+			b.sendMessage(userID, "К сожалению, не удалось загрузить видео-заметку места.")
+		}
+		// Отправляем текст отдельно, так как видео-заметки не поддерживают подписи
+		b.sendMessage(userID, caption)
+	} else if isVideo {
+		videoMsg := tgbotapi.NewVideo(userID, tgbotapi.FilePath(cache.PhotoPath))
+		videoMsg.Caption = caption
+		_, err := b.API.Send(videoMsg)
+		if err != nil {
+			log.Printf("Ошибка отправки видео: %v", err)
+			b.sendMessage(userID, "К сожалению, не удалось загрузить видео места.")
+		}
+	} else {
+		photoMsg := tgbotapi.NewPhoto(userID, tgbotapi.FilePath(cache.PhotoPath))
+		photoMsg.Caption = caption
+		_, err := b.API.Send(photoMsg)
+		if err != nil {
+			log.Printf("Ошибка отправки фотографии: %v", err)
+			b.sendMessage(userID, "К сожалению, не удалось загрузить фотографию места.")
+		}
 	}
 }
 
@@ -550,8 +605,8 @@ func (b *Bot) sendMessage(chatID int64, text string) {
 	}
 }
 
-// Функция для скачивания и сохранения фотографии
-func (b *Bot) downloadAndSavePhoto(filePath, codeWord string) (string, error) {
+// Функция для скачивания и сохранения медиафайла (фото, видео или видео-заметка)
+func (b *Bot) downloadAndSaveMedia(filePath, codeWord string) (string, error) {
 	// Получаем URL файла
 	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", b.API.Token, filePath)
 
@@ -562,8 +617,16 @@ func (b *Bot) downloadAndSavePhoto(filePath, codeWord string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	// Создаем уникальное имя файла
-	fileName := fmt.Sprintf("%s_%d%s", codeWord, time.Now().Unix(), filepath.Ext(filePath))
+	// Определяем тип файла для правильного именования
+	var fileName string
+	if strings.Contains(filePath, "video_note") {
+		// Это видео-заметка
+		fileName = fmt.Sprintf("%s_%d_videonote%s", codeWord, time.Now().Unix(), filepath.Ext(filePath))
+	} else {
+		// Обычный файл (фото или видео)
+		fileName = fmt.Sprintf("%s_%d%s", codeWord, time.Now().Unix(), filepath.Ext(filePath))
+	}
+
 	fullPath := filepath.Join(b.Config.PhotoStoragePath, fileName)
 
 	// Создаем файл
